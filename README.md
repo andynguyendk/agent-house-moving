@@ -50,6 +50,14 @@ channel (though the old instance itself keeps running until you stop it in step 
 `/key` writes it to `~/.hermes/.env` **without the value ever reaching the model**. Use a
 **DM only** — anything typed in a group is visible to everyone in it.
 
+**Declare it, or the shell can't read it.** Putting the name in `.env` is not the same as
+forwarding it to the agent's commands — sandboxed children run with a scrubbed environment.
+Add the name to `terminal.env_passthrough` in `config.yaml`, or list it under the skill's
+`required_environment_variables` (this skill already does). Then `$NEWBOX_SSH_PASSWORD` is
+available to `terminal` once the skill is loaded. Undeclared, it may still slip through on a
+plain local backend, but `execute_code` blocks any name containing `PASSWORD` and a
+remote/Docker/SSH backend forwards nothing it wasn't told to.
+
 From here on, reference it as `$NEWBOX_SSH_PASSWORD`, never as the literal: the terminal tool
 replaces a literal secret with `[REDACTED]` and the command silently breaks.
 
@@ -128,6 +136,7 @@ Agent back on its own and the bot answers → done. Until then, do not delete th
 
 ## Gotchas
 
+- **A declared var is a forwarded var.** `/key` puts a value in `.env`; the agent's shell only sees it if the name is declared (`terminal.env_passthrough` or a skill's `required_environment_variables`). `execute_code` blocks `PASSWORD`-named vars outright.
 - **One poller per token.** Two instances on one token → `409` forever. Rotate first (step 1).
 - **Never paste a secret into chat.** Passwords and tokens go through `/key` (or the vault), in a DM.
 - **Redaction breaks literal secrets.** Put the value in `.env`, reference `$VAR`; a literal becomes `[REDACTED]`.
