@@ -56,6 +56,8 @@ poller. Keep the new token out of chat; you hand it in at step 5.
 /key NEWBOX_SSH_PASSWORD <the password>
 ```
 
+> The `/key` command ships with this skill: the `keyenv` plugin lives in `plugins/keyenv/`. Install it with `cp -r plugins/keyenv ~/.hermes/plugins/ && hermes plugins enable keyenv`.
+
 `/key` writes it to `~/.hermes/.env` **without the value ever reaching the model**. Use a
 **DM only** — anything typed in a group is visible to everyone in it.
 

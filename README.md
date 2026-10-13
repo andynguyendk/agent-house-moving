@@ -16,6 +16,32 @@ hermes skills install andynguyendk/agent-house-moving/
 Or drop this folder into `~/.hermes/skills/`. Then ask your agent: *"move yourself to my new
 box"* — it will follow this procedure.
 
+The `/key` plugin the procedure relies on ships alongside it, under [`plugins/keyenv/`](plugins/keyenv/) — see below.
+
+## The `/key` plugin (shipped here)
+
+The house-move hands secrets over with `/key`, which saves a value straight into
+`~/.hermes/.env` without the value ever reaching the model. The plugin is included in this
+repo, so you don't need to source it separately.
+
+```bash
+cp -r plugins/keyenv ~/.hermes/plugins/
+hermes plugins enable keyenv
+```
+
+Then, in a **DM**:
+
+```
+/key NAME VALUE      # save NAME=VALUE into ~/.hermes/.env (not echoed, not logged)
+/key list            # show saved names
+/key rm NAME         # remove one
+```
+
+Use it in a DM only — anything typed in a group is visible to everyone in it. And note that
+saving the value is only half the job: to let the agent's shell *read* it, the name must be
+declared (this skill declares `NEWBOX_SSH_PASSWORD`; for other names use
+`terminal.env_passthrough` in `config.yaml`).
+
 ## What moves (and what never does)
 
 Ship what *defines* the agent — settings, skills, memory, schedules — as a package with

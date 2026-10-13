@@ -1,0 +1,6 @@
+name: keyenv
+version: 1.0.0
+description: Save API keys straight into ~/.hermes/.env from a DM, off-turn, without the value reaching the model.
+author: Andy
+provides_commands:
+  - key
