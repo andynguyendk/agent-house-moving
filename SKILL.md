@@ -1,13 +1,16 @@
 ---
 name: agent-house-moving
 description: Use when moving a Hermes agent to a new machine.
-version: 1.0.0
+version: 1.1.0
 author: Andy
 license: MIT
 required_environment_variables:
-  - name: NEWBOX_SSH_PASSWORD
+  - name: VPS_PW
     prompt: SSH password for the new box
-    help: Password for the sudo-capable user on the new machine (set it with /key NEWBOX_SSH_PASSWORD <pw> in a DM).
+    help: Password for the sudo-capable user on the new machine (set it with /key VPS_PW <pw> in a DM).
+  - name: TELE_2ND_BOT
+    prompt: Token of the bot the moved agent will own
+    help: The new bot's token from @BotFather (set it with /key TELE_2ND_BOT <token> in a DM). The agent copies it to the new box as TELEGRAM_BOT_TOKEN.
 metadata:
   hermes:
     tags: [hermes, migration, deploy, ssh, systemd, telegram]
@@ -26,6 +29,22 @@ Use when asked to "move my agent to my new box", "deploy my agent on my VPS", "t
 agent home", or any Session 5 capstone house-move — moving a Hermes agent to a new machine
 (VPS or MiniPC).
 
+## Two names carry the two secrets
+
+Neither value is ever typed into chat; both go in through `/key` in a **DM**:
+
+| Name | What it holds | Where it ends up |
+|------|---------------|------------------|
+| `VPS_PW` | SSH password of the sudo-capable user on the new box | used once by `sshpass` to install the key, then removed |
+| `TELE_2ND_BOT` | token of the new bot the moved agent owns (from @BotFather → `/newbot`) | copied to the new box as `TELEGRAM_BOT_TOKEN` |
+
+Both are declared in this skill's `required_environment_variables`, so once the skill is
+loaded the agent's `terminal` can read `$VPS_PW` and `$TELE_2ND_BOT`.
+
+> **Where the agent lives.** On a normal install the Hermes home is `~/.hermes`; in the
+> course container it is `/opt/data` (so `config.yaml`, `.env` and `skills/` live there).
+> Use `$HERMES_HOME` rather than hard-coding a path.
+
 ## What moves (and what never does)
 
 Ship what *defines* the agent — settings, skills, memory, schedules — as a package with
@@ -41,36 +60,45 @@ on the target, never carried in the bag.
 - Note its address and a sudo-capable user + password.
 - Check: `ssh -o ConnectTimeout=10 <user>@<newbox> hostname`
 
-### 1 · Rotate the Telegram bot token — do this first
+### 1 · Give the moved agent its own bot — do this first
 
-In Telegram, DM **@BotFather** → `/mybots` → your bot → **API Token** → **Revoke current
-token**. BotFather issues a new token and kills the old one.
+The agent already has a bot on the old box. The moved agent gets a **new** bot of its own,
+so the two never contend for one token (only one instance can poll a given token, so two
+instances on one token would `409` forever).
 
-Rotating first is the whole trick: only one instance can poll a bot token, so killing the
-old token means the old machine can never re-attach and the new box is the only possible
-poller. Keep the new token out of chat; you hand it in at step 5.
+In Telegram, DM **@BotFather** → `/newbot` → pick a name and a username → copy the token.
+Then, in a **DM** with the agent on the old box:
+
+```
+/key TELE_2ND_BOT <the new token>
+```
+
+Keep the token out of any group chat. Using a fresh bot rather than revoking the old one is
+deliberate: the old box keeps working untouched, and the new box gets a token nobody else
+polls — no `409`, no revocation, nothing to undo. Send the new bot a `/start` from your own
+Telegram account so it can reach you.
 
 ### 2 · Hand the new box's SSH password to the agent — via /key, never in chat
 
 ```
-/key NEWBOX_SSH_PASSWORD <the password>
+/key VPS_PW <the password>
 ```
 
-> The `/key` command ships with this skill: the `keyenv` plugin lives in `plugins/keyenv/`. Install it with `cp -r plugins/keyenv ~/.hermes/plugins/ && hermes plugins enable keyenv`.
-
-`/key` writes it to `~/.hermes/.env` **without the value ever reaching the model**. Use a
+`/key` writes it to `$HERMES_HOME/.env` **without the value ever reaching the model**. Use a
 **DM only** — anything typed in a group is visible to everyone in it.
+
+> The `/key` command ships with this skill: the `keyenv` plugin lives in `plugins/keyenv/`. Where you have to install it: `cp -r plugins/keyenv "$HERMES_HOME/plugins/" && hermes plugins enable keyenv`. In the course container it is already installed.
 
 **Declare it, or the shell can't read it.** Putting the name in `.env` is not the same as
 forwarding it to the agent's commands: sandboxed children run with a scrubbed environment.
 Add the name to `terminal.env_passthrough` in `config.yaml`, or list it under this skill's
-`required_environment_variables` (already done here). Then `$NEWBOX_SSH_PASSWORD` is
-available to `terminal` once the skill is loaded. Undeclared, it may still slip through on a
-plain local backend, but `execute_code` blocks any name containing `PASSWORD` and a
-remote/Docker/SSH backend forwards nothing it was not told to.
+`required_environment_variables` (already done here). Then `$VPS_PW` is available to
+`terminal` once the skill is loaded. Undeclared, it may still slip through on a plain local
+backend, but `execute_code` blocks any name containing `PASSWORD` and a remote/Docker/SSH
+backend forwards nothing it was not told to.
 
-From here on, reference it as `$NEWBOX_SSH_PASSWORD`, never as the literal: the terminal
-tool replaces a literal secret with `[REDACTED]` and the command silently breaks.
+From here on, reference it as `$VPS_PW`, never as the literal: the terminal tool replaces a
+literal secret with `[REDACTED]` and the command silently breaks.
 
 ### 3 · Install the agent's key on the new box
 
@@ -79,13 +107,13 @@ tool replaces a literal secret with `[REDACTED]` and the command silently breaks
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
 
 # push the public key (sshpass wrapping ssh-copy-id works; piping it does NOT)
-sshpass -p "$NEWBOX_SSH_PASSWORD" ssh-copy-id -o StrictHostKeyChecking=accept-new <user>@<newbox>
+sshpass -p "$VPS_PW" ssh-copy-id -o StrictHostKeyChecking=accept-new <user>@<newbox>
 ```
 
 If `sshpass`/`ssh-copy-id` is unavailable:
 
 ```bash
-sshpass -p "$NEWBOX_SSH_PASSWORD" ssh -o StrictHostKeyChecking=accept-new <user>@<newbox> \
+sshpass -p "$VPS_PW" ssh -o StrictHostKeyChecking=accept-new <user>@<newbox> \
   "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" \
   < ~/.ssh/id_ed25519.pub
 ```
@@ -111,7 +139,7 @@ Never disable password auth before the BatchMode test passes, or you lock yourse
 Then drop the password so it is not sitting in `.env` when you pack:
 
 ```
-/key rm NEWBOX_SSH_PASSWORD
+/key rm VPS_PW
 ```
 
 ### 5 · Pack and move the agent
@@ -120,19 +148,32 @@ Gather what defines the agent — never the secrets:
 
 | What | Where | Ship as |
 |------|-------|---------|
-| Settings | `~/.hermes/config.yaml` | the file |
-| Secrets | `~/.hermes/.env` | `.env.example` (keys, **NO values**) |
-| Skills | `~/.hermes/skills/` | the folders |
+| Settings | `$HERMES_HOME/config.yaml` | the file |
+| Secrets | `$HERMES_HOME/.env` | `.env.example` (keys, **NO values**) |
+| Skills | `$HERMES_HOME/skills/` | the folders |
+| Plugins | `$HERMES_HOME/plugins/` (optional) | ship `keyenv/` too if you want `/key` on the target |
 | Memory | persistent store | export, or rebuild on first use |
 | Schedules | cron config | the list |
 
 ```bash
-tar czf /tmp/agent-pack.tgz -C ~/.hermes config.yaml skills      # + memory / cron per setup
+tar czf /tmp/agent-pack.tgz -C "$HERMES_HOME" config.yaml skills   # + plugins / memory / cron per setup
 scp /tmp/agent-pack.tgz <user>@<newbox>:~/
 ```
 
-On the new box: install Hermes, extract the pack, fill real secrets into `~/.hermes/.env`
-(provider keys **and** the rotated `TELEGRAM_BOT_TOKEN` from step 1), then make it a service:
+On the new box: install Hermes, extract the pack, then fill the real secrets into
+`$HERMES_HOME/.env` — the provider key(s) **and** the new bot token. Copy them across
+without ever printing a value (run this on the OLD box):
+
+```bash
+# old box → new box; the values travel over the pipe, nothing is echoed
+grep -hE '^(TELE_2ND_BOT|TELEGRAM_ALLOWED_USERS|ANTHROPIC_API_KEY|OPENROUTER_API_KEY)=' "$HERMES_HOME/.env" \
+  | sed 's/^TELE_2ND_BOT=/TELEGRAM_BOT_TOKEN=/' \
+  | ssh <user>@<newbox> 'cat >> ~/.hermes/.env && chmod 600 ~/.hermes/.env'
+```
+
+Adjust the key names to the provider the agent actually uses, and make sure
+`TELEGRAM_ALLOWED_USERS` carries your own Telegram user id — otherwise the new bot receives
+your messages and ignores them. Then make it a service:
 
 ```ini
 # /etc/systemd/system/hermes.service  — [Service] ExecStart=<hermes> gateway, Restart=on-failure
@@ -177,13 +218,14 @@ Agent back on its own and the bot answers → done. Until then, do not delete th
 ## Gotchas
 
 - **A declared var is a forwarded var.** `/key` puts a value in `.env`; the agent's shell only sees it if the name is declared (`terminal.env_passthrough` or a skill's `required_environment_variables`). `execute_code` blocks `PASSWORD`-named vars outright.
-- **One poller per token.** Two instances on one token → `409` forever. Rotate first (step 1).
+- **One poller per token.** Two instances on one token → `409` forever. Give the moved agent its own bot (step 1) and there is no clash to begin with.
 - **Never paste a secret into chat.** Passwords and tokens go through `/key` (or the vault), in a DM.
 - **Redaction breaks literal secrets.** Put the value in `.env`, reference `$VAR` in commands; a literal becomes `[REDACTED]`.
 - **Key auth before you close the door.** The BatchMode test must pass before `PasswordAuthentication no`.
 - **Provider keys travel too.** An agent with no provider key answers nothing — fill `.env` on the target.
+- **The new bot needs `TELEGRAM_ALLOWED_USERS`.** Without your user id in the target `.env`, the moved agent is deaf to your messages.
 - **The agent can't kill its own gateway.** Host-side stop only.
 
 ## Handover line
 
-`Moved to <newbox> · token rotated · Desktop re-pointed · old box stopped · reboot survived`
+`Moved to <newbox> · own bot issued · Desktop re-pointed · old box stopped · reboot survived`
